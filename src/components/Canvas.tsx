@@ -1,7 +1,4 @@
-"use client"
-
 import type React from "react"
-
 import { useEffect, useRef, useState } from "react"
 import type { DrawingElement, Point, Tool } from "../types"
 import { generateId } from "../utils/generateId"
@@ -16,54 +13,96 @@ interface CanvasProps {
 
 const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [isDrawing, setIsDrawing] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const [selectedElement, setSelectedElement] = useState<DrawingElement | null>(null)
+  const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null)
   const [startPoint, setStartPoint] = useState<Point | null>(null)
 
-  // Redraw canvas whenever elements change
+  // Initialize and resize canvas
   useEffect(() => {
-    const canvas = canvasRef.current
-    const context = canvas?.getContext("2d")
-
-    if (!canvas || !context) return
-
-    // Clear canvas
-    context.clearRect(0, 0, canvas.width, canvas.height)
-
-    // Redraw all elements
-    elements.forEach((element) => {
-      drawElement(context, element)
-    })
-  }, [elements])
-
-  // Resize canvas to fit container
-  useEffect(() => {
-    const resizeCanvas = () => {
+    const updateCanvasSize = () => {
       const canvas = canvasRef.current
-      if (!canvas) return
+      const container = containerRef.current
+      if (!canvas || !container) return
 
-      const container = canvas.parentElement
-      if (!container) return
+      const { width, height } = container.getBoundingClientRect()
+      const dpr = window.devicePixelRatio || 1
 
-      canvas.width = container.clientWidth
-      canvas.height = container.clientHeight
+      // Set actual size in memory (scaled for pixel ratio)
+      canvas.width = width * dpr
+      canvas.height = height * dpr
 
-      // Redraw after resize
-      const context = canvas.getContext("2d")
+      // Set display size
+      canvas.style.width = `${width}px`
+      canvas.style.height = `${height}px`
+
+      // Scale context for pixel ratio
+      const context = canvas.getContext('2d')
       if (!context) return
+      context.scale(dpr, dpr)
 
-      context.clearRect(0, 0, canvas.width, canvas.height)
+      // Get theme background color
+      const background = getComputedStyle(document.documentElement)
+        .getPropertyValue('--background')
+        .trim()
+      
+      // Clear canvas with theme background
+      context.fillStyle = `hsl(${background})`
+      context.fillRect(0, 0, width, height)
+
+      // Redraw elements
       elements.forEach((element) => {
         drawElement(context, element)
       })
     }
 
-    resizeCanvas()
-    window.addEventListener("resize", resizeCanvas)
+    updateCanvasSize()
+    const observer = new ResizeObserver(updateCanvasSize)
+    const container = containerRef.current
+    if (container) {
+      observer.observe(container)
+    }
+
+    window.addEventListener('resize', updateCanvasSize)
 
     return () => {
-      window.removeEventListener("resize", resizeCanvas)
+      observer.disconnect()
+      window.removeEventListener('resize', updateCanvasSize)
     }
+  }, [elements])
+
+  // Update canvas when theme changes
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const canvas = canvasRef.current
+      const context = canvas?.getContext("2d")
+      if (!canvas || !context) return
+
+      const { width, height } = canvas.getBoundingClientRect()
+      
+      // Get new theme background color
+      const background = getComputedStyle(document.documentElement)
+        .getPropertyValue('--background')
+        .trim()
+      
+      // Clear canvas with new theme background
+      context.fillStyle = `hsl(${background})`
+      context.fillRect(0, 0, width, height)
+
+      // Redraw all elements
+      elements.forEach((element) => {
+        drawElement(context, element)
+      })
+    })
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"]
+    })
+
+    return () => observer.disconnect()
   }, [elements])
 
   const drawElement = (context: CanvasRenderingContext2D, element: DrawingElement) => {
@@ -145,32 +184,84 @@ const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps
     if (!canvas) return { x: 0, y: 0 }
 
     const rect = canvas.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
     return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
+      x: (event.clientX - rect.left) * dpr,
+      y: (event.clientY - rect.top) * dpr,
     }
   }
 
-  const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (tool === "eraser") {
-      const point = getMouseCoordinates(event)
-      const elementToErase = getElementAtPosition(point)
-      if (elementToErase !== -1) {
-        setElements(elements.filter((_, index) => index !== elementToErase))
-      }
-      return
-    }
+  const getElementAtPosition = (point: Point): number => {
+    for (let i = elements.length - 1; i >= 0; i--) {
+      const element = elements[i]
+      const { x1, y1, x2, y2, type, points } = element
 
-    setIsDrawing(true)
+      if (type === "pencil" && points) {
+        for (const p of points) {
+          const distance = Math.sqrt((p.x - point.x) ** 2 + (p.y - point.y) ** 2)
+          if (distance < 5) return i
+        }
+      } else if (x1 !== undefined && y1 !== undefined && x2 !== undefined && y2 !== undefined) {
+        if (type === "rectangle") {
+          const minX = Math.min(x1, x2)
+          const maxX = Math.max(x1, x2)
+          const minY = Math.min(y1, y2)
+          const maxY = Math.max(y1, y2)
+
+          if (point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY) {
+            return i
+          }
+        } else if (type === "circle") {
+          const centerX = (x1 + x2) / 2
+          const centerY = (y1 + y2) / 2
+          const radiusX = Math.abs(x2 - x1) / 2
+          const radiusY = Math.abs(y2 - y1) / 2
+          
+          const dx = (point.x - centerX) / radiusX
+          const dy = (point.y - centerY) / radiusY
+          if (dx * dx + dy * dy <= 1) {
+            return i
+          }
+        } else if (type === "line") {
+          const distance = pointToLineDistance(point, { x: x1, y: y1 }, { x: x2, y: y2 })
+          if (distance < 5) return i
+        }
+      }
+    }
+    return -1
+  }
+
+  const pointToLineDistance = (point: Point, start: Point, end: Point): number => {
+    const numerator = Math.abs(
+      (end.y - start.y) * point.x -
+      (end.x - start.x) * point.y +
+      end.x * start.y -
+      end.y * start.x
+    )
+    const denominator = Math.sqrt(
+      (end.y - start.y) ** 2 + (end.x - start.x) ** 2
+    )
+    return numerator / denominator
+  }
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const point = getMouseCoordinates(event)
-    setStartPoint(point)
 
     if (tool === "selection") {
       const elementIndex = getElementAtPosition(point)
-      if (elementIndex !== -1) {
-        setSelectedElement(elements[elementIndex])
+      if (elementIndex >= 0) {
+        const element = elements[elementIndex]
+        setSelectedElement(element)
+        setIsDragging(true)
+        setDragStartPoint(point)
+        return
       }
-    } else {
+    }
+
+    setIsDrawing(true)
+    setStartPoint(point)
+
+    if (tool !== "selection") {
       const newElement: DrawingElement = {
         id: generateId(),
         type: tool,
@@ -188,15 +279,39 @@ const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps
   }
 
   const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return
-
     const point = getMouseCoordinates(event)
 
-    if (tool === "selection" && selectedElement) {
-      // Move the selected element
-      // This is a simplified implementation
+    if (isDragging && selectedElement && dragStartPoint) {
+      const dx = point.x - dragStartPoint.x
+      const dy = point.y - dragStartPoint.y
+
+      const index = elements.findIndex(el => el.id === selectedElement.id)
+      if (index === -1) return
+
+      const updatedElements = [...elements]
+      const element = { ...elements[index] }
+
+      if (element.type === "pencil" && element.points) {
+        element.points = element.points.map(p => ({
+          x: p.x + dx,
+          y: p.y + dy
+        }))
+      } else {
+        if (element.x1 !== undefined) element.x1 += dx
+        if (element.y1 !== undefined) element.y1 += dy
+        if (element.x2 !== undefined) element.x2 += dx
+        if (element.y2 !== undefined) element.y2 += dy
+      }
+
+      updatedElements[index] = element
+      setElements(updatedElements)
+      setDragStartPoint(point)
       return
     }
+
+    if (!isDrawing) return
+
+    if (tool === "selection") return
 
     const index = elements.length - 1
     const updatedElements = [...elements]
@@ -218,21 +333,19 @@ const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps
 
   const handleMouseUp = () => {
     setIsDrawing(false)
+    setIsDragging(false)
     setSelectedElement(null)
+    setDragStartPoint(null)
     setStartPoint(null)
   }
 
-  const getElementAtPosition = (point: Point): number => {
-    // This is a simplified implementation
-    // In a real app, you would check if the point is inside any element
-    return -1
-  }
-
   return (
-    <div className="flex-1 overflow-hidden bg-white border-l border-zinc-200">
+    <div ref={containerRef} className="absolute inset-0 bg-background">
       <canvas
         ref={canvasRef}
-        className="w-full h-full cursor-crosshair"
+        className={`w-full h-full ${
+          tool === "selection" ? "cursor-move" : "cursor-crosshair"
+        }`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
