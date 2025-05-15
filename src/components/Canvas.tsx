@@ -20,6 +20,37 @@ const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null)
   const [startPoint, setStartPoint] = useState<Point | null>(null)
 
+  const drawGrid = (context: CanvasRenderingContext2D, width: number, height: number) => {
+    const gridSize = 20
+    context.save()
+    
+    // Get the computed border color with increased transparency for grid
+    const computedBorder = getComputedStyle(document.documentElement)
+      .getPropertyValue('--border')
+      .trim()
+    
+    context.strokeStyle = `hsla(${computedBorder}, 0.3)`  // 70% transparency
+    context.lineWidth = 1
+
+    // Draw vertical lines
+    for (let x = 0; x <= width; x += gridSize) {
+      context.beginPath()
+      context.moveTo(x, 0)
+      context.lineTo(x, height)
+      context.stroke()
+    }
+
+    // Draw horizontal lines
+    for (let y = 0; y <= height; y += gridSize) {
+      context.beginPath()
+      context.moveTo(0, y)
+      context.lineTo(width, y)
+      context.stroke()
+    }
+
+    context.restore()
+  }
+
   // Initialize and resize canvas
   useEffect(() => {
     const updateCanvasSize = () => {
@@ -51,6 +82,9 @@ const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps
       // Clear canvas with theme background
       context.fillStyle = `hsl(${background})`
       context.fillRect(0, 0, width, height)
+
+      // Draw grid
+      drawGrid(context, width, height)
 
       // Redraw elements
       elements.forEach((element) => {
@@ -90,6 +124,9 @@ const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps
       // Clear canvas with new theme background
       context.fillStyle = `hsl(${background})`
       context.fillRect(0, 0, width, height)
+
+      // Draw grid
+      drawGrid(context, width, height)
 
       // Redraw all elements
       elements.forEach((element) => {
@@ -186,8 +223,8 @@ const Canvas = ({ elements, setElements, tool, color, strokeWidth }: CanvasProps
     const rect = canvas.getBoundingClientRect()
     const dpr = window.devicePixelRatio || 1
     return {
-      x: (event.clientX - rect.left) * dpr,
-      y: (event.clientY - rect.top) * dpr,
+      x: (event.clientX - rect.left) / dpr,
+      y: (event.clientY - rect.top) / dpr,
     }
   }
 
