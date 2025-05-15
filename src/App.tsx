@@ -28,10 +28,10 @@ function App() {
         setStrokeWidth={setStrokeWidth}
       />
       <main className="relative flex-1 flex flex-col h-screen">
-        <div className="flex items-center justify-between p-4 border-b">
+        <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between p-4 border-b border-border/40 bg-background/30 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
           <h1 className="text-lg font-semibold">Canvas Draw</h1>
           <button
-            className="p-2 rounded-md bg-secondary hover:bg-secondary/80 transition-colors"
+            className="p-2 rounded-md bg-secondary/50 hover:bg-secondary/70 transition-colors backdrop-blur-xs"
             onClick={() => {
               const newTheme = theme === 'dark' ? 'light' : 'dark'
               setTheme(newTheme)
